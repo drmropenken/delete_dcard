@@ -1,5 +1,9 @@
 # delete_dcard
 
+批次刪除 Dcard 文章與留言的 Python / Playwright 自動化工具。適合需要清理自己帳號內容、刪除 Dcard 發文、批次刪除 Dcard 留言，或管理不同 Dcard 身分文章與留言的使用者。
+
+Batch delete Dcard posts and comments with Python and Playwright. This tool helps automate deleting your own Dcard articles, comments, and persona-specific content after manual login.
+
 本專案包含 4 支 Playwright 腳本，可協助使用者自動登入 Dcard，並批次刪除自己帳號下的文章或留言。
 
 > 注意：刪除文章與留言通常無法復原。請只在自己的帳號與自己有權處理的內容上使用，並自行確認是否符合 Dcard 服務條款與相關規範。本專案與 Dcard 官方無關。
