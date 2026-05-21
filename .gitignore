@@ -1,0 +1,25 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Conda / virtual environment
+.env
+.venv
+venv/
+ENV/
+env/
+
+# Logs and local files
+*.log
+
+# Playwright login session state
+auth.json
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+delete_dcard.code-workspace

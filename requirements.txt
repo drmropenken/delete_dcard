@@ -1,0 +1,7 @@
+greenlet==3.5.0
+packaging==26.0
+playwright==1.60.0
+pyee==13.0.1
+typing_extensions==4.15.0
+setuptools==82.0.1
+wheel==0.46.3
