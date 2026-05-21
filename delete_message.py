@@ -5,9 +5,11 @@
 時會直接載入該檔案，避免再次輸入帳號密碼。
 
 使用方式：
-    conda run -n myenv python delete_dcard/delete_message.py [--fresh]
+    conda run -n myenv python delete_dcard/delete_message.py [--fresh] [--yes] [--limit N]
 
 * ``--fresh``：忽略已存在的 ``auth.json``，重新開啟瀏覽器讓使用者手動登入。
+* ``--yes``：略過刪除前的二次確認，適合已確認無誤的自動化情境。
+* ``--limit``：最多刪除幾則留言，適合第一次測試。
 """
 
 import argparse
@@ -62,6 +64,22 @@ def _ensure_logged_in(
         print(f"【已儲存】登入狀態已寫入 {auth_path}")
 
 
+def _confirm_start(target: str, yes: bool) -> None:
+    """在不可逆刪除前要求使用者明確確認。"""
+    if yes:
+        print("【警告】已使用 --yes，將略過刪除前的二次確認。")
+        return
+
+    print("\n==================================================")
+    print(f"【重要】即將開始刪除：{target}")
+    print("【重要】刪除後通常無法復原，請確認瀏覽器中的帳號與頁面正確。")
+    print("==================================================")
+    answer = input("若確定要繼續，請輸入 DELETE：").strip()
+    if answer != "DELETE":
+        print("【取消】未輸入 DELETE，已停止執行。")
+        raise SystemExit(1)
+
+
 def _delete_single_comment(page: Page) -> bool:
     """刪除單則留言，成功刪除回傳 True，失敗回傳 False。
 
@@ -103,10 +121,10 @@ def _delete_single_comment(page: Page) -> bool:
         return False
 
 
-def _delete_all_comments(page: Page) -> int:
+def _delete_all_comments(page: Page, limit: int | None) -> int:
     """在 Dcard 個人留言頁面上逐筆刪除留言，回傳刪除總數。"""
     deleted = 0
-    while True:
+    while limit is None or deleted < limit:
         # 檢查是否有「更多」按鈕
         more_btn = page.locator('button[title="more"], button[title="更多"]').first
         if not more_btn.is_visible():
@@ -130,6 +148,8 @@ def _delete_all_comments(page: Page) -> int:
             page.wait_for_timeout(2500)
         else:
             deleted += 1
+    if limit is not None and deleted >= limit:
+        print(f"【停止】已達 --limit {limit} 則。")
     return deleted
 
 
@@ -142,7 +162,20 @@ def main() -> None:
         action="store_true",
         help="Ignore existing auth.json and start a fresh browser session.",
     )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the DELETE confirmation prompt before deleting.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum number of comments to delete in this run.",
+    )
     args = parser.parse_args()
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit must be a positive integer.")
 
     auth_path = os.path.join(os.path.dirname(__file__), "auth.json")
     comments_url = "https://www.dcard.tw/my/persona?tab=comments"
@@ -169,7 +202,8 @@ def main() -> None:
         except Exception:
             print("【無法確認總數】將直接開始依序刪除。")
 
-        deleted = _delete_all_comments(page)
+        _confirm_start("所有留言", args.yes)
+        deleted = _delete_all_comments(page, args.limit)
         context.storage_state(path=auth_path)
         print(f"【大功告成】本次執行共刪除了 {deleted} 則留言！")
         context.browser.close()

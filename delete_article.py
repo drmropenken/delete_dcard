@@ -5,9 +5,11 @@
 時會直接載入該檔案，避免再次輸入帳號密碼。
 
 使用方式：
-    conda run -n myenv python delete_dcard/delete_article.py [--fresh]
+    conda run -n myenv python delete_dcard/delete_article.py [--fresh] [--yes] [--limit N]
 
 * ``--fresh``：忽略已存在的 ``auth.json``，重新開啟瀏覽器讓使用者手動登入。
+* ``--yes``：略過刪除前的二次確認，適合已確認無誤的自動化情境。
+* ``--limit``：最多刪除幾篇文章，適合第一次測試。
 """
 
 import argparse
@@ -59,6 +61,22 @@ def _ensure_logged_in(
         input()
         context.storage_state(path=auth_path)
         print(f"【已儲存】登入狀態已寫入 {auth_path}")
+
+
+def _confirm_start(target: str, yes: bool) -> None:
+    """在不可逆刪除前要求使用者明確確認。"""
+    if yes:
+        print("【警告】已使用 --yes，將略過刪除前的二次確認。")
+        return
+
+    print("\n==================================================")
+    print(f"【重要】即將開始刪除：{target}")
+    print("【重要】刪除後通常無法復原，請確認瀏覽器中的帳號與頁面正確。")
+    print("==================================================")
+    answer = input("若確定要繼續，請輸入 DELETE：").strip()
+    if answer != "DELETE":
+        print("【取消】未輸入 DELETE，已停止執行。")
+        raise SystemExit(1)
 
 
 def _delete_single_article(page: Page, persona_url: str) -> bool:
@@ -129,10 +147,10 @@ def _delete_single_article(page: Page, persona_url: str) -> bool:
         return False
 
 
-def _delete_all_articles(page: Page, persona_url: str) -> int:
+def _delete_all_articles(page: Page, persona_url: str, limit: int | None) -> int:
     """在 Dcard 個人頁面上逐筆刪除文章，回傳刪除總數。"""
     deleted = 0
-    while True:
+    while limit is None or deleted < limit:
         if not _delete_single_article(page, persona_url):
             # 如果刪失敗，嘗試重整頁面
             print("【提示】找不到文章，嘗試重整...")
@@ -143,6 +161,8 @@ def _delete_all_articles(page: Page, persona_url: str) -> int:
                 print("【結束】找不到任何文章，全數刪除完畢！")
                 break
         deleted += 1
+    if limit is not None and deleted >= limit:
+        print(f"【停止】已達 --limit {limit} 篇。")
     return deleted
 
 
@@ -155,7 +175,20 @@ def main() -> None:
         action="store_true",
         help="Ignore existing auth.json and start a fresh browser session.",
     )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the DELETE confirmation prompt before deleting.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum number of articles to delete in this run.",
+    )
     args = parser.parse_args()
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit must be a positive integer.")
 
     auth_path = os.path.join(os.path.dirname(__file__), "auth.json")
     persona_url = "https://www.dcard.tw/my/persona"
@@ -169,7 +202,8 @@ def main() -> None:
         _ensure_logged_in(context, page, auth_path, use_saved)
 
         print("【開始執行】正在偵測文章狀態...")
-        deleted = _delete_all_articles(page, persona_url)
+        _confirm_start("所有文章", args.yes)
+        deleted = _delete_all_articles(page, persona_url, args.limit)
         context.storage_state(path=auth_path)
         print(f"【大功告成】本次執行共刪除了 {deleted} 篇文章！")
         context.browser.close()

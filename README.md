@@ -1,6 +1,8 @@
 # delete_dcard
 
-本專案包含 4 支 Dcard 自動刪除腳本，用於自動登入 Dcard 並刪除文章或留言。專案核心仍維持原始邏輯，僅補充必要的設定檔與說明。
+本專案包含 4 支 Playwright 腳本，可協助使用者自動登入 Dcard，並批次刪除自己帳號下的文章或留言。
+
+> 注意：刪除文章與留言通常無法復原。請只在自己的帳號與自己有權處理的內容上使用，並自行確認是否符合 Dcard 服務條款與相關規範。本專案與 Dcard 官方無關。
 
 ## 檔案結構
 
@@ -16,7 +18,6 @@
 ## 使用環境
 
 - Python 3.12
-- Conda 環境名稱：`myenv`
 - Playwright 1.60.0
 
 ## 快速安裝
@@ -45,28 +46,49 @@ playwright install chrome
 
 - `auth.json` 包含你的 Dcard session cookies / localStorage，請務必不要上傳到 GitHub。這個檔案已經加入 `.gitignore`。
 - 若你要重新登入，執行腳本時加上 `--fresh` 參數，會忽略既有 `auth.json`，重新開啟瀏覽器讓你手動登入。
+- 每次開始刪除前，程式會要求輸入 `DELETE` 進行二次確認。若你已確認要在自動化流程中略過確認，可以加上 `--yes`。
+- 第一次測試建議先加 `--limit 1`，確認刪除範圍正確後再移除上限。
 
 ## 執行方式
 
 在專案目錄中執行：
 
 ```bash
-cd /Users/chun-chiehchin/WorkingSpace/delete_dcard
 conda activate myenv
-python delete_article.py
-python delete_article.py --fresh
-python delete_article_with_name.py --persona-name "Trash TSMC"
-python delete_article_with_name.py --fresh --persona-name "Trash TSMC"
-python delete_message.py
-python delete_message.py --fresh
-python delete_message_with_name.py --persona-name "Trash TSMC"
-python delete_message_with_name.py --fresh --persona-name "Trash TSMC"
+python delete_article.py --limit 1
+python delete_article.py --fresh --limit 1
+python delete_article.py --yes
+
+python delete_article_with_name.py --persona-name "你的身分名稱" --limit 1
+python delete_article_with_name.py --fresh --persona-name "你的身分名稱" --limit 1
+python delete_article_with_name.py --persona-name "你的身分名稱" --yes
+
+python delete_message.py --limit 1
+python delete_message.py --fresh --limit 1
+python delete_message.py --yes
+
+python delete_message_with_name.py --persona-name "你的身分名稱" --limit 1
+python delete_message_with_name.py --fresh --persona-name "你的身分名稱" --limit 1
+python delete_message_with_name.py --persona-name "你的身分名稱" --yes
 ```
 
-如果你使用其他 persona 名稱，請把 `--persona-name` 後面的值改成你自己的名稱。
+`--persona-name` 請填入你在 Dcard 個人頁面看到的身分名稱。
 
 如果 Dcard 網址將來有變動，請檢查並更新程式碼中的 `persona_url` / `comments_url` 變數值。
+
 ## 注意事項
 
 - 因為 Dcard 網站會變動，執行時若定位器找不到對應按鈕，腳本會顯示錯誤並嘗試跳過該條目。
 - 目前 `auth.json` 只會保存在本機，GitHub 上只需要上傳程式與說明文件。
+- 指定身分名稱的留言腳本若找不到該身分，會直接停止，避免刪到非預期範圍。
+
+## 上傳 GitHub 前檢查
+
+```bash
+git status --short
+git ls-files
+git check-ignore -v auth.json
+python -m py_compile delete_article.py delete_article_with_name.py delete_message.py delete_message_with_name.py
+```
+
+確認 `git ls-files` 沒有出現 `auth.json` 後，再建立 GitHub repository 並 push。

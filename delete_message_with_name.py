@@ -5,13 +5,16 @@
 時會直接載入該檔案，避免再次輸入帳號密碼。
 
 使用方式：
-    conda run -n myenv python delete_dcard/delete_message_with_name.py [--fresh] [--persona-name "Your Name"]
+    conda run -n myenv python delete_dcard/delete_message_with_name.py --persona-name "Your Name" [--fresh] [--yes] [--limit N]
 
 * ``--fresh``：忽略已存在的 ``auth.json``，重新開啟瀏覽器讓使用者手動登入。
-* ``--persona-name``：指定要切換的 Dcard persona 名稱，預設為 ``Trash TSMC``。
+* ``--persona-name``：指定要切換的 Dcard persona 名稱。
+* ``--yes``：略過刪除前的二次確認，適合已確認無誤的自動化情境。
+* ``--limit``：最多刪除幾則留言，適合第一次測試。
 """
 
 import argparse
+import json
 import os
 import re
 from typing import Tuple
@@ -63,18 +66,37 @@ def _ensure_logged_in(
         print(f"【已儲存】登入狀態已寫入 {auth_path}")
 
 
-def _switch_to_persona_page(page: Page, persona_name: str) -> None:
+def _confirm_start(target: str, yes: bool) -> None:
+    """在不可逆刪除前要求使用者明確確認。"""
+    if yes:
+        print("【警告】已使用 --yes，將略過刪除前的二次確認。")
+        return
+
+    print("\n==================================================")
+    print(f"【重要】即將開始刪除：{target}")
+    print("【重要】刪除後通常無法復原，請確認瀏覽器中的帳號與頁面正確。")
+    print("==================================================")
+    answer = input("若確定要繼續，請輸入 DELETE：").strip()
+    if answer != "DELETE":
+        print("【取消】未輸入 DELETE，已停止執行。")
+        raise SystemExit(1)
+
+
+def _switch_to_persona_page(page: Page, persona_name: str) -> bool:
     """切換到指定名稱的個人頁面。"""
     # 尋找內文含有 persona_name 的那個最外層身分卡片 div，並點擊它
+    persona_name_selector = json.dumps(persona_name)
     persona_card = (
-        page.locator(f'div:has-text("{persona_name}")')
+        page.locator(f"div:has-text({persona_name_selector})")
         .filter(has=page.locator('div[style*="pointer"]'))
         .first
     )
 
     # 或者更精準的寫法（直接定位最外層，並限定內部文字）：
     if not persona_card.is_visible():
-        persona_card = page.locator(f'div.d_12rlolc:has-text("{persona_name}")').first
+        persona_card = page.locator(
+            f"div.d_12rlolc:has-text({persona_name_selector})"
+        ).first
 
     if persona_card.is_visible():
         persona_card.click()
@@ -85,8 +107,10 @@ def _switch_to_persona_page(page: Page, persona_name: str) -> None:
             reply_btn.click()
         else:
             print("【提示】未找到回覆按鈕，可能已經在正確頁面。")
+        return True
     else:
-        print(f"【警告】找不到名稱為 '{persona_name}' 的卡片，使用預設留言頁面。")
+        print(f"【警告】找不到名稱為 '{persona_name}' 的卡片，已停止避免刪錯範圍。")
+        return False
 
 
 def _delete_single_comment(page: Page) -> bool:
@@ -130,10 +154,10 @@ def _delete_single_comment(page: Page) -> bool:
         return False
 
 
-def _delete_all_comments(page: Page) -> int:
+def _delete_all_comments(page: Page, limit: int | None) -> int:
     """在 Dcard 個人留言頁面上逐筆刪除留言，回傳刪除總數。"""
     deleted = 0
-    while True:
+    while limit is None or deleted < limit:
         # 檢查是否有「更多」按鈕
         more_btn = page.locator('button[title="more"], button[title="更多"]').first
         if not more_btn.is_visible():
@@ -157,6 +181,8 @@ def _delete_all_comments(page: Page) -> int:
             page.wait_for_timeout(2500)
         else:
             deleted += 1
+    if limit is not None and deleted >= limit:
+        print(f"【停止】已達 --limit {limit} 則。")
     return deleted
 
 
@@ -171,10 +197,23 @@ def main() -> None:
     )
     parser.add_argument(
         "--persona-name",
-        default="Trash TSMC",
+        required=True,
         help="The Dcard persona display name to select, e.g. your personal identity name.",
     )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the DELETE confirmation prompt before deleting.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum number of comments to delete in this run.",
+    )
     args = parser.parse_args()
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit must be a positive integer.")
 
     auth_path = os.path.join(os.path.dirname(__file__), "auth.json")
     comments_url = "https://www.dcard.tw/my/persona?tab=comments"
@@ -203,9 +242,12 @@ def main() -> None:
             print("【無法確認總數】將直接開始依序刪除。")
 
         # 切換到個人名稱頁面，因為有些人是沒有公開文章的，只有留言在個人名稱頁面才看得到
-        _switch_to_persona_page(page, args.persona_name)
+        if not _switch_to_persona_page(page, args.persona_name):
+            context.browser.close()
+            raise SystemExit(1)
 
-        deleted = _delete_all_comments(page)
+        _confirm_start(f"身分「{args.persona_name}」的留言", args.yes)
+        deleted = _delete_all_comments(page, args.limit)
         context.storage_state(path=auth_path)
         print(f"【大功告成】本次執行共刪除了 {deleted} 則留言！")
         context.browser.close()

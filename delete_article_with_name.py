@@ -1,17 +1,20 @@
-"""delete_article.py – 使用 Playwright 自動登入 Dcard 並刪除所有文章
+"""delete_article_with_name.py – 使用 Playwright 自動登入 Dcard 並刪除指定名稱的文章
 
 此腳本會在第一次執行時要求手動登入，之後會把瀏覽器的 session
 (cookies、localStorage 等) 儲存至同目錄下的 ``auth.json``，未來再執行
 時會直接載入該檔案，避免再次輸入帳號密碼。
 
 使用方式：
-    conda run -n myenv python delete_dcard/delete_article_with_name.py [--fresh] [--persona-name "Your Name"]
+    conda run -n myenv python delete_dcard/delete_article_with_name.py --persona-name "Your Name" [--fresh] [--yes] [--limit N]
 
 * ``--fresh``：忽略已存在的 ``auth.json``，重新開啟瀏覽器讓使用者手動登入。
-* ``--persona-name``：指定要切換的 Dcard persona 名稱，預設為 ``Trash TSMC``。
+* ``--persona-name``：指定要切換的 Dcard persona 名稱。
+* ``--yes``：略過刪除前的二次確認，適合已確認無誤的自動化情境。
+* ``--limit``：最多刪除幾篇文章，適合第一次測試。
 """
 
 import argparse
+import json
 import os
 from typing import Tuple
 
@@ -60,6 +63,22 @@ def _ensure_logged_in(
         input()
         context.storage_state(path=auth_path)
         print(f"【已儲存】登入狀態已寫入 {auth_path}")
+
+
+def _confirm_start(target: str, yes: bool) -> None:
+    """在不可逆刪除前要求使用者明確確認。"""
+    if yes:
+        print("【警告】已使用 --yes，將略過刪除前的二次確認。")
+        return
+
+    print("\n==================================================")
+    print(f"【重要】即將開始刪除：{target}")
+    print("【重要】刪除後通常無法復原，請確認瀏覽器中的帳號與頁面正確。")
+    print("==================================================")
+    answer = input("若確定要繼續，請輸入 DELETE：").strip()
+    if answer != "DELETE":
+        print("【取消】未輸入 DELETE，已停止執行。")
+        raise SystemExit(1)
 
 
 def _delete_single_article(page: Page, persona_url: str) -> bool:
@@ -129,17 +148,20 @@ def _delete_single_article(page: Page, persona_url: str) -> bool:
         return False
 
 
-def _delete_all_articles(page: Page, persona_name: str) -> int:
+def _delete_all_articles(page: Page, persona_name: str, limit: int | None) -> int:
     """在 Dcard 個人頁面上逐筆刪除文章，回傳刪除總數。"""
     deleted = 0
+    persona_name_selector = json.dumps(persona_name)
     persona_card = (
-        page.locator(f'div:has-text("{persona_name}")')
+        page.locator(f"div:has-text({persona_name_selector})")
         .filter(has=page.locator('div[style*="pointer"]'))
         .first
     )
     # 如果第一種定位方式失敗，改用更精準的 CSS 類別定位。
     if not persona_card.is_visible():
-        persona_card = page.locator(f'div.d_12rlolc:has-text("{persona_name}")').first
+        persona_card = page.locator(
+            f"div.d_12rlolc:has-text({persona_name_selector})"
+        ).first
 
     if not persona_card.is_visible():
         print(
@@ -151,7 +173,7 @@ def _delete_all_articles(page: Page, persona_name: str) -> int:
     page.wait_for_timeout(1000)
     current_url = page.url
     print(f"【成功】順利取得當前身分網址：{current_url}")
-    while True:
+    while limit is None or deleted < limit:
         if not _delete_single_article(page, current_url):
             # 如果刪失敗，嘗試重整頁面
             print("【提示】找不到文章，嘗試重整...")
@@ -162,6 +184,8 @@ def _delete_all_articles(page: Page, persona_name: str) -> int:
                 print("【結束】找不到任何文章，全數刪除完畢！")
                 break
         deleted += 1
+    if limit is not None and deleted >= limit:
+        print(f"【停止】已達 --limit {limit} 篇。")
     return deleted
 
 
@@ -176,10 +200,23 @@ def main() -> None:
     )
     parser.add_argument(
         "--persona-name",
-        default="Trash TSMC",
+        required=True,
         help="The Dcard persona display name to select, e.g. your personal identity name.",
     )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Skip the DELETE confirmation prompt before deleting.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum number of articles to delete in this run.",
+    )
     args = parser.parse_args()
+    if args.limit is not None and args.limit < 1:
+        parser.error("--limit must be a positive integer.")
 
     auth_path = os.path.join(os.path.dirname(__file__), "auth.json")
     persona_url = "https://www.dcard.tw/my/persona"
@@ -194,7 +231,8 @@ def main() -> None:
         _ensure_logged_in(context, page, auth_path, use_saved)
 
         print("【開始執行】正在偵測文章狀態...")
-        deleted = _delete_all_articles(page, args.persona_name)
+        _confirm_start(f"身分「{args.persona_name}」的文章", args.yes)
+        deleted = _delete_all_articles(page, args.persona_name, args.limit)
         context.storage_state(path=auth_path)
         print(f"【大功告成】本次執行共刪除了 {deleted} 篇文章！")
         context.browser.close()

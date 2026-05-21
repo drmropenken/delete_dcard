@@ -12,9 +12,18 @@ env/
 
 # Logs and local files
 *.log
+.env.*
 
 # Playwright login session state
 auth.json
+auth*.json
+playwright-report/
+test-results/
+*.har
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
 
 # macOS
 .DS_Store
